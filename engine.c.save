@@ -1,0 +1,175 @@
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+
+#define CONTROL_PATH "/tmp/mini_runtime.sock"
+
+typedef struct {
+    int kind;
+    char id[32];
+    char rootfs[256];
+    char cmd[256];
+} request;
+
+typedef struct {
+    int status;
+    char msg[256];
+} response;
+
+/* ================= CLIENT ================= */
+
+int send_request(request *req) {
+    int sock;
+    struct sockaddr_un addr;
+    response res;
+
+    sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, CONTROL_PATH);
+
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("connect");
+        return 1;
+    }
+
+    write(sock, req, sizeof(*req));
+    read(sock, &res, sizeof(res));
+
+    printf("%s\n", res.msg);
+
+    close(sock);
+    return 0;
+}
+
+/* ================= SUPERVISOR ================= */
+
+int run_supervisor() {
+    int server_fd, client_fd;
+    struct sockaddr_un addr;
+
+    unlink(CONTROL_PATH);
+
+    server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strcpy(addr.sun_path, CONTROL_PATH);
+
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        return 1;
+    }
+
+    listen(server_fd, 5);
+
+    printf("Supervisor running...\n");
+
+    while (1) {
+        request req;
+        response res;
+
+        client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd < 0) continue;
+
+        read(client_fd, &req, sizeof(req));
+
+        /* START */
+        if (req.kind == 1) {
+            pid_t pid = fork();
+
+            if (pid == 0) {
+                chroot(req.rootfs);
+                chdir("/");
+                
+                perror("exec");
+                exit(1);
+            }
+
+            sprintf(res.msg, "Started %s PID %d", req.id, pid);
+            res.status = 0;
+        }
+
+        /* PS */
+        else if (req.kind == 2) {
+            sprintf(res.msg, "Run: ps -ef | grep engine");
+            res.status = 0;
+        }
+
+        /* STOP */
+        else if (req.kind == 3) {
+            sprintf(res.msg, "Stop not implemented yet");
+            res.status = 0;
+        }
+
+        else {
+            sprintf(res.msg, "Unknown command");
+            res.status = 1;
+        }
+
+        write(client_fd, &res, sizeof(res));
+        close(client_fd);
+    }
+}
+
+/* ================= MAIN ================= */
+
+int main(int argc, char *argv[]) {
+
+    if (argc < 2) {
+        printf("Usage:\n");
+        printf("./engine supervisor\n");
+        printf("./engine start <id> <rootfs> <cmd>\n");
+        printf("./engine ps\n");
+        return 1;
+    }
+
+    /* SUPERVISOR */
+    if (strcmp(argv[1], "supervisor") == 0) {
+        return run_supervisor();
+    }
+
+    /* START */
+    else if (strcmp(argv[1], "start") == 0) {
+        request req = {0};
+        req.kind = 1;
+
+        strcpy(req.id, argv[2]);
+        strcpy(req.rootfs, argv[3]);
+        strcpy(req.cmd, argv[4]);
+
+        return send_request(&req);
+    }
+
+    /* PS */
+    else if (strcmp(argv[1], "ps") == 0) {
+        request req = {0};
+        req.kind = 2;
+        return send_request(&req);
+    }
+
+    /* STOP */
+    else if (strcmp(argv[1], "stop") == 0) {
+        request req = {0};
+        req.kind = 3;
+        strcpy(req.id, argv[2]);
+        return send_request(&req);
+    }
+
+    printf("Unknown command\n");
+    return 1;
+}
