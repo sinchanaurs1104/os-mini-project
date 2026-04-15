@@ -19,16 +19,10 @@ Step-by-step commands to build, load, and run the project on Ubuntu 22.04/24.04.
 ---
 
 ### Build
----
 
-### Load kernel module
-
-```bash
-sudo insmod monitor.ko
 ```bash
 make
-
----
+```
 
 ## 3. Demo with Screenshots
 
