@@ -104,6 +104,77 @@ CPU usage visible in top command.
 
 No zombie processes after execution.
 
-## 4. Summary
+## 4. Engineering Analysis
 
-This project implements a lightweight container runtime in C with supervisor architecture, logging pipeline, and kernel memory monitoring.
+### 1. Isolation Mechanisms
+Modern operating systems provide isolation to ensure that processes do not interfere with each other. In this project, isolation is achieved using chroot, which restricts a process to a specific directory as its root filesystem.
+
+This simulates container-like behavior by ensuring that each container has its own independent filesystem view. Although all containers share the same underlying kernel, filesystem isolation prevents processes from accessing files outside their designated environment.
+
+---
+
+### 2. Supervisor and Process Lifecycle
+A supervisor process manages the lifecycle of all containers, including creation, execution, and termination.
+
+It uses system calls like fork() and exec(), tracks execution, and reaps child processes to prevent zombies.
+
+---
+
+### 3. IPC and Synchronization
+UNIX domain sockets are used for communication between the CLI and the supervisor.
+
+The logging system follows a producer-consumer model where container output is captured and written to log files safely.
+
+---
+
+### 4. Memory Management
+Memory is monitored using a kernel module with soft and hard limits.
+
+Soft limit generates warnings, while hard limit terminates the process when exceeded.
+
+---
+
+### 5. Scheduling Behavior
+CPU-bound workloads demonstrate how the Linux scheduler distributes CPU time among processes, ensuring fairness.
+
+---
+
+## 5. Design Decisions and Tradeoffs
+
+### Namespace Isolation
+- Choice: chroot  
+- Tradeoff: limited isolation  
+- Reason: simple implementation  
+
+### Supervisor Architecture
+- Choice: single supervisor  
+- Tradeoff: less scalable  
+- Reason: easier control  
+
+### IPC and Logging
+- Choice: UNIX sockets + file logging  
+- Tradeoff: no real-time streaming  
+- Reason: simple and reliable  
+
+### Kernel Monitor
+- Choice: ioctl-based kernel module  
+- Tradeoff: complex implementation  
+- Reason: direct kernel interaction  
+
+### Scheduling Experiments
+- Choice: CPU-bound workloads  
+- Tradeoff: limited scenarios  
+- Reason: clear demonstration  
+
+---
+
+## 6. Scheduler Experiment Results
+
+| Container | Process  | CPU Usage |
+|----------|---------|----------|
+| c1       | cpu_hog | ~50%     |
+| c2       | cpu_hog | ~50%     |
+
+Both processes received approximately equal CPU time.
+
+This demonstrates that the Linux scheduler ensures fair CPU distribution among processes.
